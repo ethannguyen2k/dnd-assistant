@@ -39,13 +39,18 @@ body {
 .header h1 {
   color: var(--primary-color);
   text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.game-state-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .game-state {
   display: flex;
-  justify-content: center;
   align-items: center;
-  margin-top: 0.5rem;
 }
 
 .state-indicator {
@@ -75,8 +80,12 @@ body {
   color: white;
 }
 
-.character-toggle-btn {
-  margin-left: 1rem;
+.panel-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.panel-toggle-btn {
   padding: 0.3rem 0.7rem;
   background-color: #7f8c8d;
   color: white;
@@ -84,12 +93,40 @@ body {
   border-radius: 15px;
   cursor: pointer;
   font-size: 0.8rem;
+  transition: background-color 0.3s;
+}
+
+.panel-toggle-btn:hover {
+  background-color: #95a5a6;
+}
+
+.panel-toggle-btn.active {
+  background-color: #34495e;
+}
+
+.panel-toggle-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 }
 
 .main-content {
   display: flex;
   flex: 1;
   overflow: hidden;
+}
+
+.sidebar-container {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 300px;
+  gap: 1rem;
+  overflow-y: auto;
+  max-height: calc(100vh - 150px);
+}
+
+.sidebar-container:not(.active) {
+  display: none;
 }
 
 .chat-container {
@@ -100,6 +137,7 @@ body {
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  margin-left: 1rem;
 }
 
 .messages {
@@ -141,10 +179,6 @@ body {
   border-bottom-left-radius: 0;
 }
 
-.message-content {
-  white-space: pre-wrap;
-}
-
 /* Styling for markdown elements inside messages */
 .message-content h1,
 .message-content h2,
@@ -155,10 +189,6 @@ body {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   color: var(--primary-color);
-}
-
-.message-content p {
-  margin-bottom: 0.75rem;
 }
 
 .message-content strong {
@@ -281,7 +311,27 @@ button:disabled {
     flex-direction: column;
   }
   
+  .sidebar-container {
+    width: 100%;
+    max-height: none;
+    margin-bottom: 1rem;
+  }
+  
+  .chat-container {
+    margin-left: 0;
+  }
+  
   .message {
     max-width: 90%;
+  }
+  
+  .game-state-controls {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .panel-controls {
+    width: 100%;
+    justify-content: center;
   }
 }

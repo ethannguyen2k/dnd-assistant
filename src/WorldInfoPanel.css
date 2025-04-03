@@ -1,0 +1,263 @@
+.world-info-panel {
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+    width: 300px;
+    height: 100%;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  
+  .world-info-panel h2 {
+    margin: 0 0 1rem 0;
+    color: #2c3e50;
+    font-size: 1.5rem;
+    text-align: center;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.5rem;
+  }
+  
+  .world-info-placeholder {
+    padding: 1rem;
+    text-align: center;
+    color: #7f8c8d;
+    font-style: italic;
+  }
+  
+  .tabs {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .tab-button {
+    background: none;
+    border: none;
+    padding: 0.5rem;
+    flex-grow: 1;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #7f8c8d;
+    transition: all 0.3s ease;
+  }
+  
+  .tab-button:hover {
+    background-color: #f0f0f0;
+  }
+  
+  .tab-button.active {
+    color: #3498db;
+    border-bottom: 2px solid #3498db;
+    font-weight: bold;
+  }
+  
+  .tab-content {
+    max-height: calc(100% - 80px);
+    overflow-y: auto;
+  }
+  
+  .empty-state {
+    text-align: center;
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 1rem;
+  }
+  
+  /* Locations styling */
+  .location-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .location-item {
+    background-color: #fff;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 0.8rem;
+    margin-bottom: 0.8rem;
+  }
+  
+  .location-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  
+  .location-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #34495e;
+  }
+  
+  .location-type {
+    background-color: #3498db;
+    color: white;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-weight: bold;
+    text-transform: capitalize;
+  }
+  
+  .location-description {
+    font-size: 0.9rem;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  
+  .location-poi h4 {
+    font-size: 0.9rem;
+    margin: 0.5rem 0;
+    color: #7f8c8d;
+  }
+  
+  .location-poi ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    font-size: 0.85rem;
+  }
+  
+  /* NPCs styling */
+  .npc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .npc-item {
+    background-color: #fff;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 0.8rem;
+    margin-bottom: 0.8rem;
+  }
+  
+  .npc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  
+  .npc-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #34495e;
+  }
+  
+  .npc-role {
+    background-color: #e67e22;
+    color: white;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-weight: bold;
+    text-transform: capitalize;
+  }
+  
+  .npc-description {
+    font-size: 0.9rem;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  
+  .npc-location, .npc-personality {
+    font-size: 0.85rem;
+    margin: 0.3rem 0;
+  }
+  
+  /* Quests styling */
+  .quest-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .quest-item {
+    background-color: #fff;
+    border: 1px solid #eee;
+    border-left: 5px solid #95a5a6; /* Default border */
+    border-radius: 4px;
+    padding: 0.8rem;
+    margin-bottom: 0.8rem;
+  }
+  
+  .quest-item.status-not_started {
+    border-left-color: #3498db; /* Blue for not started */
+  }
+  
+  .quest-item.status-in_progress {
+    border-left-color: #f39c12; /* Orange for in progress */
+  }
+  
+  .quest-item.status-completed {
+    border-left-color: #2ecc71; /* Green for completed */
+  }
+  
+  .quest-item.status-failed {
+    border-left-color: #e74c3c; /* Red for failed */
+  }
+  
+  .quest-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  
+  .quest-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #34495e;
+  }
+  
+  .quest-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-weight: bold;
+    text-transform: capitalize;
+    color: white;
+  }
+  
+  .status-not_started .quest-status {
+    background-color: #3498db;
+  }
+  
+  .status-in_progress .quest-status {
+    background-color: #f39c12;
+  }
+  
+  .status-completed .quest-status {
+    background-color: #2ecc71;
+  }
+  
+  .status-failed .quest-status {
+    background-color: #e74c3c;
+  }
+  
+  .quest-description {
+    font-size: 0.9rem;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  
+  .quest-giver, .quest-location, .quest-reward {
+    font-size: 0.85rem;
+    margin: 0.3rem 0;
+  }
+  
+  @media (max-width: 768px) {
+    .world-info-panel {
+      width: 100%;
+      margin-top: 0;
+      margin-bottom: 1rem;
+      height: auto;
+      max-height: 300px;
+    }
+  }

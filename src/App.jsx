@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
 import CharacterPanel from './CharacterPanel';
+import WorldInfoPanel from './WorldInfoPanel';
 import './App.css';
 
 function App() {
@@ -10,7 +10,9 @@ function App() {
   const [sessionId, setSessionId] = useState('');
   const [gameState, setGameState] = useState('character_creation');
   const [character, setCharacter] = useState(null);
+  const [worldInfo, setWorldInfo] = useState(null);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
+  const [showWorldInfoPanel, setShowWorldInfoPanel] = useState(false);
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom of messages
@@ -51,6 +53,7 @@ function App() {
   useEffect(() => {
     if (sessionId) {
       fetchCharacter();
+      fetchWorldInfo();
     }
   }, [sessionId]);
 
@@ -64,12 +67,31 @@ function App() {
         const data = await response.json();
         setCharacter(data);
         // Show character panel if we have character data
-        if (data && Object.keys(data).length > 0) {
+        if (data && Object.keys(data).length > 0 && data.name) {
           setShowCharacterPanel(true);
         }
       }
     } catch (error) {
       console.error('Error fetching character:', error);
+    }
+  };
+
+  const fetchWorldInfo = async () => {
+    if (!sessionId) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/world?session_id=${sessionId}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setWorldInfo(data);
+        // Show world info panel if we have world data
+        if (data && (data.locations?.length > 0 || data.npcs?.length > 0 || data.quests?.length > 0)) {
+          setShowWorldInfoPanel(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching world info:', error);
     }
   };
 
@@ -111,11 +133,32 @@ function App() {
         setGameState(data.game_state);
       }
       
+      if (data.character) {
+        setCharacter(data.character);
+        if (data.character && Object.keys(data.character).length > 0 && data.character.name) {
+          setShowCharacterPanel(true);
+        }
+      }
+      
+      // Log function calls for debugging
+      if (data.function_calls && data.function_calls.length > 0) {
+        console.log('Function calls executed:', data.function_calls);
+        
+        // Refresh world info if needed
+        const needsWorldRefresh = data.function_calls.some(call => 
+          call.function === 'add_world_location' || 
+          call.function === 'add_npc' || 
+          call.function === 'update_quest'
+        );
+        
+        if (needsWorldRefresh) {
+          fetchWorldInfo();
+        }
+      }
+      
       // Add AI response to chat
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
       
-      // Fetch updated character info
-      fetchCharacter();
     } catch (error) {
       console.error('Error:', error);
       setMessages(prev => [...prev, { 
@@ -129,6 +172,10 @@ function App() {
 
   const toggleCharacterPanel = () => {
     setShowCharacterPanel(!showCharacterPanel);
+  };
+
+  const toggleWorldInfoPanel = () => {
+    setShowWorldInfoPanel(!showWorldInfoPanel);
   };
 
   const updateCharacter = async (updatedCharacter) => {
@@ -158,29 +205,48 @@ function App() {
     <div className="app-container">
       <header className="header">
         <h1>D&D Game Master Assistant</h1>
-        <div className="game-state">
-          <span className="state-indicator">Current Mode: </span>
-          <span className={`state-value ${gameState}`}>
-            {gameState === 'character_creation' ? 'Character Creation' : 
-             gameState === 'combat' ? 'Combat' : 'Adventure'}
-          </span>
-          <button 
-            className="character-toggle-btn"
-            onClick={toggleCharacterPanel}
-          >
-            {showCharacterPanel ? 'Hide Character' : 'Show Character'}
-          </button>
+        <div className="game-state-controls">
+          <div className="game-state">
+            <span className="state-indicator">Mode: </span>
+            <span className={`state-value ${gameState}`}>
+              {gameState === 'character_creation' ? 'Character Creation' : 
+               gameState === 'combat' ? 'Combat' : 'Adventure'}
+            </span>
+          </div>
+          <div className="panel-controls">
+            <button 
+              className={`panel-toggle-btn ${showCharacterPanel ? 'active' : ''}`}
+              onClick={toggleCharacterPanel}
+            >
+              {showCharacterPanel ? 'Hide Character' : 'Show Character'}
+            </button>
+            <button 
+              className={`panel-toggle-btn ${showWorldInfoPanel ? 'active' : ''}`}
+              onClick={toggleWorldInfoPanel}
+              disabled={!worldInfo || (worldInfo.locations.length === 0 && worldInfo.npcs.length === 0 && worldInfo.quests.length === 0)}
+            >
+              {showWorldInfoPanel ? 'Hide World Info' : 'Show World Info'}
+            </button>
+          </div>
         </div>
       </header>
       
       <div className="main-content">
-        {showCharacterPanel && (
-          <CharacterPanel 
-            character={character} 
-            updateCharacter={updateCharacter}
-            gameState={gameState}
-          />
-        )}
+        <div className={`sidebar-container ${showCharacterPanel || showWorldInfoPanel ? 'active' : ''}`}>
+          {showCharacterPanel && (
+            <CharacterPanel 
+              character={character} 
+              updateCharacter={updateCharacter}
+              gameState={gameState}
+            />
+          )}
+          
+          {showWorldInfoPanel && (
+            <WorldInfoPanel 
+              worldInfo={worldInfo}
+            />
+          )}
+        </div>
         
         <div className="chat-container">
           <div className="messages">
@@ -196,9 +262,7 @@ function App() {
             ) : (
               messages.map((message, index) => (
                 <div key={index} className={`message ${message.role}`}>
-                  <div className="message-content">
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
-                    </div>
+                  <div className="message-content">{message.content}</div>
                 </div>
               ))
             )}

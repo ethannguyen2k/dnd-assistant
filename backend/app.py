@@ -4,16 +4,19 @@ import requests
 import json
 import uuid
 from datetime import datetime
+import traceback
 from db_manager import DatabaseManager
 from prompts import get_system_prompt
-import traceback
+from function_handler import FunctionHandler
+from function_schemas import FUNCTION_SCHEMAS
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)  # Enable CORS with credentials support
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure random key
 
-# Initialize database
+# Initialize database and function handler
 db = DatabaseManager()
+function_handler = FunctionHandler(db)
 
 # Ollama API endpoint - adjust if Ollama is running on a different host
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -50,9 +53,24 @@ def chat():
         # Get character information if available
         character = db.get_character(session_id)
         
+        # Get world information if available
+        locations = db.get_locations(session_id)
+        npcs = db.get_npcs(session_id)
+        quests = db.get_quests(session_id)
+        combat_state = db.get_combat_state(session_id)
+        
         # Format message history and add system prompt
         system_prompt = get_system_prompt(game_state)
-        formatted_messages = format_messages(message_history, user_message, system_prompt, character)
+        formatted_messages = format_messages(
+            message_history, 
+            user_message, 
+            system_prompt, 
+            character, 
+            locations, 
+            npcs, 
+            quests, 
+            combat_state
+        )
         
         # Call Ollama API
         response = requests.post(
@@ -73,31 +91,31 @@ def chat():
         response_data = response.json()
         ai_response = response_data.get('response', 'No response generated')
         
-        # Save assistant message to database
-        db.save_message(session_id, "assistant", ai_response)
+        # Process function calls in the response
+        cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
         
-        # Check if we need to transition game state
-        # This is a simple rule-based approach - could be made more sophisticated
-        if game_state == "character_creation" and "ready to begin the adventure" in ai_response.lower():
-            db.update_game_state(session_id, "adventure")
-            game_state = "adventure"
-        elif game_state == "adventure" and any(combat_phrase in ai_response.lower() for combat_phrase in 
-                                            ["roll for initiative", "combat begins", "enter combat"]):
-            db.update_game_state(session_id, "combat")
-            game_state = "combat"
-        elif game_state == "combat" and any(end_phrase in ai_response.lower() for end_phrase in 
-                                          ["combat ends", "fight is over", "defeated all"]):
-            db.update_game_state(session_id, "adventure")
-            game_state = "adventure"
+        # Check if the model is trying to speak for the player
+        if "Player:" in cleaned_response:
+            # Truncate at the point where the model speaks for the player
+            cleaned_response = cleaned_response.split("Player:")[0]
+            # Add a reminder
+            cleaned_response += "\n\n[Waiting for your input...]"
         
-        # Check the response for potential character updates
-        if game_state == "character_creation":
-            extract_character_info(ai_response, user_message, session_id)
+        # Save cleaned assistant message to database
+        db.save_message(session_id, "assistant", cleaned_response)
+        
+        # Get current game state after function calls
+        game_state = db.get_game_state(session_id)
+        
+        # Get updated character data
+        character = db.get_character(session_id)
         
         return jsonify({
-            "response": ai_response,
+            "response": cleaned_response,
             "session_id": session_id,
-            "game_state": game_state
+            "game_state": game_state,
+            "function_calls": function_results,
+            "character": character
         })
     
     except Exception as e:
@@ -131,13 +149,31 @@ def update_character():
     character_id = db.save_character(session_id, character_data)
     return jsonify({"character_id": character_id})
 
-def format_messages(history, current_message, system_prompt, character=None):
+@app.route('/world', methods=['GET'])
+def get_world_info():
+    """Get world information for a session."""
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({"error": "Session ID required"}), 400
+    
+    locations = db.get_locations(session_id)
+    npcs = db.get_npcs(session_id)
+    quests = db.get_quests(session_id)
+    
+    return jsonify({
+        "locations": locations,
+        "npcs": npcs,
+        "quests": quests
+    })
+
+def format_messages(history, current_message, system_prompt, character=None, 
+                   locations=None, npcs=None, quests=None, combat_state=None):
     """Format the conversation history and current message for Ollama."""
     # Start with the system prompt
     formatted_prompt = system_prompt + "\n\n"
     
     # Add character information if available
-    if character:
+    if character and character.get('name'):
         formatted_prompt += "PLAYER CHARACTER:\n"
         for key, value in character.items():
             if key != 'inventory':  # Handle inventory separately
@@ -148,6 +184,38 @@ def format_messages(history, current_message, system_prompt, character=None):
             formatted_prompt += "Inventory:\n"
             for item in character['inventory']:
                 formatted_prompt += f"- {item}\n"
+        
+        formatted_prompt += "\n"
+    
+    # Add world information if available
+    if locations and len(locations) > 0:
+        formatted_prompt += "KNOWN LOCATIONS:\n"
+        for loc in locations[:5]:  # Limit to 5 to keep context manageable
+            formatted_prompt += f"- {loc['name']}: {loc['type']} - {loc['description'][:100]}...\n"
+        formatted_prompt += "\n"
+    
+    if npcs and len(npcs) > 0:
+        formatted_prompt += "KNOWN NPCs:\n"
+        for npc in npcs[:5]:  # Limit to 5
+            formatted_prompt += f"- {npc['name']}: {npc['role']} - {npc['description'][:100]}...\n"
+        formatted_prompt += "\n"
+    
+    if quests and len(quests) > 0:
+        formatted_prompt += "ACTIVE QUESTS:\n"
+        for quest in [q for q in quests if q['status'] in ['not_started', 'in_progress']][:3]:
+            formatted_prompt += f"- {quest['title']} ({quest['status']}): {quest['description'][:100]}...\n"
+        formatted_prompt += "\n"
+    
+    # Add combat state if in combat
+    if combat_state and combat_state.get('is_in_combat'):
+        formatted_prompt += "CURRENT COMBAT STATE:\n"
+        formatted_prompt += f"Round: {combat_state.get('round', 1)}\n"
+        formatted_prompt += f"Current turn: {combat_state.get('current_combatant', 'Unknown')}\n"
+        
+        if 'initiative_order' in combat_state and combat_state['initiative_order']:
+            formatted_prompt += "Initiative order:\n"
+            for combatant in combat_state['initiative_order']:
+                formatted_prompt += f"- {combatant.get('name', 'Unknown')}: {combatant.get('initiative', 0)}\n"
         
         formatted_prompt += "\n"
     
@@ -166,48 +234,6 @@ def format_messages(history, current_message, system_prompt, character=None):
     formatted_prompt += "Game Master:"
     
     return formatted_prompt
-
-def extract_character_info(ai_response, user_message, session_id):
-    """
-    Extract character information from the conversation.
-    This is a simple rule-based extraction - could be enhanced with NLP or function calling.
-    """
-    # Get existing character data or create new
-    character = db.get_character(session_id) or {}
-    
-    # Check for common character attributes in the user message
-    # Name
-    if "my name is" in user_message.lower() or "name:" in user_message.lower():
-        for line in user_message.split("\n"):
-            if "my name is" in line.lower():
-                character['name'] = line.lower().split("my name is")[1].strip()
-                break
-            elif "name:" in line.lower():
-                character['name'] = line.lower().split("name:")[1].strip()
-                break
-    
-    # Race
-    for race in ["human", "elf", "dwarf", "halfling", "gnome", "half-elf", "half-orc", "tiefling", "dragonborn"]:
-        if f"i am a {race}" in user_message.lower() or f"i'm a {race}" in user_message.lower() or f"race: {race}" in user_message.lower():
-            character['race'] = race
-            break
-    
-    # Class
-    for char_class in ["fighter", "wizard", "rogue", "cleric", "ranger", "paladin", "barbarian", "bard", "druid", "monk", "sorcerer", "warlock"]:
-        if f"i am a {char_class}" in user_message.lower() or f"i'm a {char_class}" in user_message.lower() or f"class: {char_class}" in user_message.lower():
-            character['class'] = char_class
-            break
-    
-    # Background
-    if "background:" in user_message.lower():
-        for line in user_message.split("\n"):
-            if "background:" in line.lower():
-                character['background'] = line.split("background:")[1].strip()
-                break
-    
-    # Only save if we extracted something
-    if any(key in character for key in ['name', 'race', 'class', 'background']):
-        db.save_character(session_id, character)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
