@@ -1,25 +1,38 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
-import requests
 import json
 import uuid
+import os
+import asyncio
 from datetime import datetime
 import traceback
+from dotenv import load_dotenv
 from db_manager import DatabaseManager
 from prompts import get_system_prompt
 from function_handler import FunctionHandler
 from function_schemas import FUNCTION_SCHEMAS
+from model_handler import ModelHandler
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)  # Enable CORS with credentials support
-app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure random key
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 
-# Initialize database and function handler
+# Initialize database, function handler, and model handler
 db = DatabaseManager()
 function_handler = FunctionHandler(db)
+model_handler = ModelHandler()
 
-# Ollama API endpoint - adjust if Ollama is running on a different host
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
+# Get default model from environment variables
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'local')
+
+@app.route('/models', methods=['GET'])
+def get_models():
+    """Get available models."""
+    models = model_handler.get_available_models()
+    return jsonify(models)
 
 @app.route('/session', methods=['POST'])
 def create_session():
@@ -28,11 +41,12 @@ def create_session():
     return jsonify({"session_id": session_id})
 
 @app.route('/chat', methods=['POST'])
-def chat():
+async def chat():
     try:
         data = request.json
         user_message = data.get('message', '')
         session_id = data.get('session_id', '')
+        model_id = data.get('model_id', DEFAULT_MODEL)
         
         # If no session_id provided, create a new one
         if not session_id:
@@ -72,27 +86,30 @@ def chat():
             combat_state
         )
         
-        # Call Ollama API
-        response = requests.post(
-            OLLAMA_API_URL,
-            json={
-                "model": "mistral-nemo:latest",  # Replace with your preferred model
-                "prompt": formatted_messages,
-                "stream": False
-            }
+        # Generate response using the selected model
+        model_response = await model_handler.generate_response(
+            model_id,
+            formatted_messages,
+            FUNCTION_SCHEMAS if model_id.startswith("gemini") else None
         )
         
-        if response.status_code != 200:
-            return jsonify({
-                "error": "Error from Ollama API",
-                "details": response.text
-            }), 500
+        ai_response = model_response["response"]
+        model_function_calls = model_response["function_calls"]
         
-        response_data = response.json()
-        ai_response = response_data.get('response', 'No response generated')
-        
-        # Process function calls in the response
-        cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
+        # Process function calls
+        if model_id.startswith("gemini") and model_function_calls:
+            # Process Gemini's structured function calls
+            function_results = []
+            for call in model_function_calls:
+                function_name = call["function"]
+                function_args = call["arguments"]
+                result = function_handler._execute_function(function_name, function_args, session_id)
+                function_results.append(result)
+            
+            cleaned_response = ai_response  # No need to clean for Gemini function calls
+        else:
+            # For Ollama, parse function calls from text
+            cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
         
         # Check if the model is trying to speak for the player
         if "Player:" in cleaned_response:
@@ -115,7 +132,8 @@ def chat():
             "session_id": session_id,
             "game_state": game_state,
             "function_calls": function_results,
-            "character": character
+            "character": character,
+            "model_used": model_id
         })
     
     except Exception as e:
@@ -168,7 +186,7 @@ def get_world_info():
 
 def format_messages(history, current_message, system_prompt, character=None, 
                    locations=None, npcs=None, quests=None, combat_state=None):
-    """Format the conversation history and current message for Ollama."""
+    """Format the conversation history and current message for the LLM."""
     # Start with the system prompt
     formatted_prompt = system_prompt + "\n\n"
     
@@ -236,4 +254,7 @@ def format_messages(history, current_message, system_prompt, character=None,
     return formatted_prompt
 
 if __name__ == '__main__':
+    # Make app run with asyncio support
+    import nest_asyncio
+    nest_asyncio.apply()
     app.run(debug=True, host='0.0.0.0', port=5000)

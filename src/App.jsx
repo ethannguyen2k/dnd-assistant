@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CharacterPanel from './CharacterPanel';
 import WorldInfoPanel from './WorldInfoPanel';
+import ModelSelector from './ModelSelector';
 import './App.css';
+import ReactMarkdown from 'react-markdown';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -13,11 +15,23 @@ function App() {
   const [worldInfo, setWorldInfo] = useState(null);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
   const [showWorldInfoPanel, setShowWorldInfoPanel] = useState(false);
+  const [availableModels, setAvailableModels] = useState({});
+  const [selectedModel, setSelectedModel] = useState('local');
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom of messages
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Handle model change
+  const handleModelChange = (modelId) => {
+    setSelectedModel(modelId);
+    // Optionally add a system message to indicate model change
+    setMessages(prev => [...prev, { 
+      role: 'system', 
+      content: `Switched to ${availableModels[modelId]?.description || modelId} model` 
+    }]);
   };
 
   useEffect(() => {
@@ -114,7 +128,8 @@ function App() {
         },
         body: JSON.stringify({ 
           message: input,
-          session_id: sessionId
+          session_id: sessionId,
+          model_id: selectedModel
         }),
       });
 
@@ -213,6 +228,11 @@ function App() {
                gameState === 'combat' ? 'Combat' : 'Adventure'}
             </span>
           </div>
+          <ModelSelector 
+            models={availableModels} 
+            selectedModel={selectedModel} 
+            onSelectModel={handleModelChange} 
+          />
           <div className="panel-controls">
             <button 
               className={`panel-toggle-btn ${showCharacterPanel ? 'active' : ''}`}
@@ -262,7 +282,9 @@ function App() {
             ) : (
               messages.map((message, index) => (
                 <div key={index} className={`message ${message.role}`}>
-                  <div className="message-content">{message.content}</div>
+                  <div className="message-content">
+                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                  </div>
                 </div>
               ))
             )}
