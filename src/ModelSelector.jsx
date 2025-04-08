@@ -13,6 +13,7 @@ const ModelSelector = ({ models, selectedModel, onSelectModel }) => {
         id="model-select"
         value={selectedModel}
         onChange={(e) => onSelectModel(e.target.value)}
+        aria-label="Select AI model"
       >
         {Object.entries(models).map(([id, model]) => (
           <option key={id} value={id}>

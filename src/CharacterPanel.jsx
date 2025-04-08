@@ -87,6 +87,10 @@ const CharacterPanel = ({ character, updateCharacter, gameState }) => {
               <span>{character.race || 'Unknown'}</span>
             </div>
             <div className="character-field">
+              <label>Gender:</label>
+              <span>{character.gender || 'Not specified'}</span>
+            </div>
+            <div className="character-field">
               <label>Class:</label>
               <span>{character.class || 'Unknown'}</span>
             </div>
@@ -204,6 +208,15 @@ const CharacterPanel = ({ character, updateCharacter, gameState }) => {
               type="text" 
               name="race" 
               value={editedCharacter.race || ''} 
+              onChange={handleChange} 
+            />
+          </div>
+          <div className="form-group">
+            <label>Gender:</label>
+            <input 
+              type="text" 
+              name="gender" 
+              value={editedCharacter.gender || ''} 
               onChange={handleChange} 
             />
           </div>

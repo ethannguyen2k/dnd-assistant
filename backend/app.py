@@ -1,62 +1,94 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
+import requests
 import json
 import uuid
-import os
-import asyncio
 from datetime import datetime
 import traceback
-from dotenv import load_dotenv
+import logging
 from db_manager import DatabaseManager
 from prompts import get_system_prompt
 from function_handler import FunctionHandler
 from function_schemas import FUNCTION_SCHEMAS
-from model_handler import ModelHandler
+import os
+import re
 
-# Load environment variables from .env file
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Log to console
+    ]
+)
+logger = logging.getLogger('dnd_gm_assistant')
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)  # Enable CORS with credentials support
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
+app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure random key
 
-# Initialize database, function handler, and model handler
+# Initialize database and function handler
 db = DatabaseManager()
 function_handler = FunctionHandler(db)
-model_handler = ModelHandler()
 
-# Get default model from environment variables
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'local')
+# Ollama API endpoint - adjust if Ollama is running on a different host
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
-@app.route('/models', methods=['GET'])
-def get_models():
-    """Get available models."""
-    models = model_handler.get_available_models()
-    return jsonify(models)
+# Gemini API endpoint and key 
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  # Set this as an environment variable
 
 @app.route('/session', methods=['POST'])
 def create_session():
     """Create a new game session."""
     session_id = db.create_session()
+    logger.info(f"Created new session: {session_id}")
     return jsonify({"session_id": session_id})
 
+@app.route('/models', methods=['GET'])
+def get_models():
+    """Get available models."""
+    models = {
+        'local': {
+            'id': 'local',
+            'description': 'Local (Mistral)',
+            'capabilities': ['text']
+        }
+    }
+    
+    # Only add Gemini if API key is set
+    if GEMINI_API_KEY:
+        models['gemini'] = {
+            'id': 'gemini',
+            'description': 'Google Gemini',
+            'capabilities': ['text']
+        }
+    
+    logger.info(f"Available models: {', '.join(models.keys())}")
+    return jsonify(models)
+
 @app.route('/chat', methods=['POST'])
-async def chat():
+def chat():
     try:
         data = request.json
         user_message = data.get('message', '')
         session_id = data.get('session_id', '')
-        model_id = data.get('model_id', DEFAULT_MODEL)
+        model_id = data.get('model_id', 'local')  # Default to local model
+        
+        logger.info(f"Chat request - Session: {session_id}, Model: {model_id}")
+        logger.info(f"User message: {user_message[:50]}{'...' if len(user_message) > 50 else ''}")
         
         # If no session_id provided, create a new one
         if not session_id:
             session_id = db.create_session()
+            logger.info(f"Created new session: {session_id}")
         else:
             # Update last active timestamp
             db.update_session_activity(session_id)
         
         # Get current game state
         game_state = db.get_game_state(session_id) or "character_creation"
+        logger.info(f"Current game state: {game_state}")
         
         # Get message history from database
         message_history = db.get_messages(session_id)
@@ -86,31 +118,20 @@ async def chat():
             combat_state
         )
         
-        # Generate response using the selected model
-        model_response = await model_handler.generate_response(
-            model_id,
-            formatted_messages,
-            FUNCTION_SCHEMAS if model_id.startswith("gemini") else None
-        )
-        
-        ai_response = model_response["response"]
-        model_function_calls = model_response["function_calls"]
-        
-        # Process function calls
-        if model_id.startswith("gemini") and model_function_calls:
-            # Process Gemini's structured function calls
-            function_results = []
-            for call in model_function_calls:
-                function_name = call["function"]
-                function_args = call["arguments"]
-                result = function_handler._execute_function(function_name, function_args, session_id)
-                function_results.append(result)
-            
-            cleaned_response = ai_response  # No need to clean for Gemini function calls
+        # Choose the model endpoint based on model_id
+        if model_id == 'gemini' and GEMINI_API_KEY:
+            logger.info("Using Google Gemini model for generation")
+            ai_response = call_gemini_api(formatted_messages)
         else:
-            # For Ollama, parse function calls from text
-            cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
+            logger.info("Using local Ollama model for generation")
+            # Default to local Ollama model
+            ai_response = call_ollama_api(formatted_messages)
         
+        # Process function calls in the response
+        cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
+        cleaned_response = re.sub(r'```function.*?```', '', cleaned_response, flags=re.DOTALL)
+        cleaned_response = re.sub(r'function\s+\w+\s*\(.*?\)', '', cleaned_response, flags=re.DOTALL)
+
         # Check if the model is trying to speak for the player
         if "Player:" in cleaned_response:
             # Truncate at the point where the model speaks for the player
@@ -123,23 +144,105 @@ async def chat():
         
         # Get current game state after function calls
         game_state = db.get_game_state(session_id)
+        if game_state == "character_creation" and character and character.get('name') and 'ready to begin' in ai_response.lower():
+            db.update_game_state(session_id, "adventure")
+            game_state = "adventure"
         
         # Get updated character data
         character = db.get_character(session_id)
+        
+        logger.info(f"Response generated - Length: {len(cleaned_response)} chars")
+        if function_results:
+            logger.info(f"Functions executed: {[result.get('function') for result in function_results if result.get('success')]}")
         
         return jsonify({
             "response": cleaned_response,
             "session_id": session_id,
             "game_state": game_state,
             "function_calls": function_results,
-            "character": character,
-            "model_used": model_id
+            "character": character
         })
     
     except Exception as e:
-        print(f"Error: {str(e)}")
-        print(traceback.format_exc())
+        logger.error(f"Error processing chat request: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+def call_ollama_api(formatted_messages):
+    """Call the Ollama API with the formatted messages."""
+    logger.info("Sending request to Ollama API")
+    start_time = datetime.now()
+    
+    response = requests.post(
+        OLLAMA_API_URL,
+        json={
+            "model": "mistral-nemo:latest",  # Replace with your preferred model
+            "prompt": formatted_messages,
+            "stream": False
+        }
+    )
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    logger.info(f"Ollama API response received in {duration:.2f} seconds")
+    
+    if response.status_code != 200:
+        logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+        raise Exception(f"Error from Ollama API: {response.text}")
+    
+    response_data = response.json()
+    return response_data.get('response', 'No response generated')
+
+def call_gemini_api(formatted_messages):
+    """Call the Google Gemini API with the formatted messages."""
+    if not GEMINI_API_KEY:
+        logger.error("Gemini API key not set")
+        raise Exception("Gemini API key not set")
+    
+    logger.info("Sending request to Google Gemini API")
+    start_time = datetime.now()
+    
+    # Prepare the request for Gemini API
+    prompt_data = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": formatted_messages
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.7,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 2048
+        }
+    }
+    
+    response = requests.post(
+        f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+        json=prompt_data
+    )
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    logger.info(f"Gemini API response received in {duration:.2f} seconds")
+    
+    if response.status_code != 200:
+        logger.error(f"Gemini API error: {response.status_code} - {response.text}")
+        raise Exception(f"Error from Gemini API: {response.text}")
+    
+    response_data = response.json()
+    
+    # Extract the response text from Gemini's response structure
+    try:
+        return response_data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        logger.error("Unexpected response structure from Gemini API")
+        logger.error(f"Response: {json.dumps(response_data)}")
+        raise Exception("Unexpected response structure from Gemini API")
 
 @app.route('/character', methods=['GET'])
 def get_character():
@@ -254,7 +357,7 @@ def format_messages(history, current_message, system_prompt, character=None,
     return formatted_prompt
 
 if __name__ == '__main__':
-    # Make app run with asyncio support
-    import nest_asyncio
-    nest_asyncio.apply()
+    logger.info("Starting D&D Game Master Assistant server...")
+    logger.info(f"Local Ollama API URL: {OLLAMA_API_URL}")
+    logger.info(f"Gemini API available: {bool(GEMINI_API_KEY)}")
     app.run(debug=True, host='0.0.0.0', port=5000)

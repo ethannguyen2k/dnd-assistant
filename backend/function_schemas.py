@@ -14,6 +14,10 @@ FUNCTION_SCHEMAS = {
                     "type": "string",
                     "description": "Character race (e.g., Human, Elf, Dwarf)"
                 },
+                "gender": {
+                    "type": "string",
+                    "description": "Character gender"
+                },
                 "class": {
                     "type": "string",
                     "description": "Character class (e.g., Fighter, Wizard, Rogue)"

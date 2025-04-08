@@ -1,9 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import CharacterPanel from './CharacterPanel';
 import WorldInfoPanel from './WorldInfoPanel';
 import ModelSelector from './ModelSelector';
 import './App.css';
 import ReactMarkdown from 'react-markdown';
+
+// Add an API error handler utility
+const handleApiError = (error) => {
+  console.error('API Error:', error);
+  return {
+    error: true,
+    message: error.message || 'An unknown error occurred'
+  };
+};
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -15,7 +24,11 @@ function App() {
   const [worldInfo, setWorldInfo] = useState(null);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
   const [showWorldInfoPanel, setShowWorldInfoPanel] = useState(false);
-  const [availableModels, setAvailableModels] = useState({});
+  // Initialize with default model options
+  const [availableModels, setAvailableModels] = useState({
+    'local': { description: 'Local (Mistral)' },
+    'gemini': { description: 'Google Gemini' }
+  });
   const [selectedModel, setSelectedModel] = useState('local');
   const messagesEndRef = useRef(null);
 
@@ -38,40 +51,45 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  // Create a new session when component mounts
+  // Create a new session and fetch available models when component mounts
   useEffect(() => {
-    const createSession = async () => {
+    const initializeApp = async () => {
       try {
-        const response = await fetch('http://localhost:5000/session', {
+        // Create session
+        const sessionResponse = await fetch('http://localhost:5000/session', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
         });
 
-        if (!response.ok) {
+        if (!sessionResponse.ok) {
           throw new Error('Failed to create session');
         }
 
-        const data = await response.json();
-        setSessionId(data.session_id);
+        const sessionData = await sessionResponse.json();
+        setSessionId(sessionData.session_id);
+        
+        // Fetch available models
+        const modelsResponse = await fetch('http://localhost:5000/models');
+        if (modelsResponse.ok) {
+          const modelsData = await modelsResponse.json();
+          if (Object.keys(modelsData).length > 0) {
+            setAvailableModels(modelsData);
+            // Set default model to first available one
+            setSelectedModel(Object.keys(modelsData)[0]);
+          }
+        }
       } catch (error) {
-        console.error('Error creating session:', error);
+        console.error('Error initializing app:', error);
       }
     };
 
-    createSession();
+    initializeApp();
   }, []);
 
-  // Fetch character data when session ID changes
-  useEffect(() => {
-    if (sessionId) {
-      fetchCharacter();
-      fetchWorldInfo();
-    }
-  }, [sessionId]);
-
-  const fetchCharacter = async () => {
+  // Add these useCallback wrappers at the top level of your component
+  const fetchCharacter = useCallback(async () => {
     if (!sessionId) return;
 
     try {
@@ -88,9 +106,9 @@ function App() {
     } catch (error) {
       console.error('Error fetching character:', error);
     }
-  };
+  }, [sessionId]);
 
-  const fetchWorldInfo = async () => {
+  const fetchWorldInfo = useCallback(async () => {
     if (!sessionId) return;
 
     try {
@@ -107,7 +125,15 @@ function App() {
     } catch (error) {
       console.error('Error fetching world info:', error);
     }
-  };
+  }, [sessionId]);
+
+    // Fetch character data when session ID changes
+  useEffect(() => {
+    if (sessionId) {
+      fetchCharacter();
+      fetchWorldInfo();
+    }
+  }, [sessionId, fetchCharacter, fetchWorldInfo]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -176,9 +202,10 @@ function App() {
       
     } catch (error) {
       console.error('Error:', error);
+      const errorResult = handleApiError(error);
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        content: "Sorry, there was an error connecting to the game master. Please try again." 
+        content: `Error: ${errorResult.message}` || "Sorry, there was an error connecting to the game master. Please try again." 
       }]);
     } finally {
       setIsLoading(false);
@@ -212,7 +239,8 @@ function App() {
 
       setCharacter(updatedCharacter);
     } catch (error) {
-      console.error('Error updating character:', error);
+      const errorResult = handleApiError(error);
+      console.error('Error updating character:', errorResult.message);
     }
   };
 
@@ -221,18 +249,22 @@ function App() {
       <header className="header">
         <h1>D&D Game Master Assistant</h1>
         <div className="game-state-controls">
-          <div className="game-state">
-            <span className="state-indicator">Mode: </span>
-            <span className={`state-value ${gameState}`}>
-              {gameState === 'character_creation' ? 'Character Creation' : 
-               gameState === 'combat' ? 'Combat' : 'Adventure'}
-            </span>
+          <div className="controls-row">
+            <div className="game-state">
+              <span className="state-indicator">Mode: </span>
+              <span className={`state-value ${gameState}`}>
+                {gameState === 'character_creation' ? 'Character Creation' : 
+                 gameState === 'combat' ? 'Combat' : 'Adventure'}
+              </span>
+            </div>
+            {Object.keys(availableModels).length > 0 && (
+              <ModelSelector 
+                models={availableModels} 
+                selectedModel={selectedModel} 
+                onSelectModel={handleModelChange} 
+              />
+            )}
           </div>
-          <ModelSelector 
-            models={availableModels} 
-            selectedModel={selectedModel} 
-            onSelectModel={handleModelChange} 
-          />
           <div className="panel-controls">
             <button 
               className={`panel-toggle-btn ${showCharacterPanel ? 'active' : ''}`}
@@ -243,7 +275,7 @@ function App() {
             <button 
               className={`panel-toggle-btn ${showWorldInfoPanel ? 'active' : ''}`}
               onClick={toggleWorldInfoPanel}
-              disabled={!worldInfo || (worldInfo.locations.length === 0 && worldInfo.npcs.length === 0 && worldInfo.quests.length === 0)}
+              disabled={!worldInfo || (worldInfo.locations?.length === 0 && worldInfo.npcs?.length === 0 && worldInfo.quests?.length === 0)}
             >
               {showWorldInfoPanel ? 'Hide World Info' : 'Show World Info'}
             </button>

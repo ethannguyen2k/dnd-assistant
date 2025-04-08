@@ -11,8 +11,13 @@ class FunctionHandler:
     def parse_and_execute_functions(self, ai_response, session_id):
         """Parse the AI response for function calls and execute them."""
         # Extract all function calls using regex pattern
+        # Original pattern for backward compatibility
         function_pattern = r'```function\s+(\w+)\s*\((.*?)\)\s*```'
         function_calls = re.findall(function_pattern, ai_response, re.DOTALL)
+        
+        # Alternative pattern without code blocks
+        alt_function_pattern = r'function\s+(\w+)\s*\((.*?)\)'
+        function_calls.extend(re.findall(alt_function_pattern, ai_response, re.DOTALL))
         
         results = []
         
@@ -44,7 +49,8 @@ class FunctionHandler:
             'add_world_location': self._add_world_location,
             'add_npc': self._add_npc,
             'update_quest': self._update_quest,
-            'update_combat_state': self._update_combat_state
+            'update_combat_state': self._update_combat_state,
+            'start_adventure': self._handle_adventure_start,
         }
         
         if func_name in func_mapping:
@@ -145,3 +151,12 @@ class FunctionHandler:
                 'function': 'update_combat_state',
                 'error': str(e)
             }
+        
+    def _handle_adventure_start(self, session_id):
+        """Update game state to adventure when character creation is complete."""
+        self.db.update_game_state(session_id, "adventure")
+        return {
+            'success': True,
+            'function': 'start_adventure',
+            'message': 'Transitioned to adventure mode'
+        }
