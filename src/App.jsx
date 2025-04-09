@@ -22,8 +22,6 @@ function App() {
   const [gameState, setGameState] = useState('character_creation');
   const [character, setCharacter] = useState(null);
   const [worldInfo, setWorldInfo] = useState(null);
-  const [showCharacterPanel, setShowCharacterPanel] = useState(false);
-  const [showWorldInfoPanel, setShowWorldInfoPanel] = useState(false);
   // Initialize with default model options
   const [availableModels, setAvailableModels] = useState({
     'local': { description: 'Local (Mistral)' },
@@ -98,10 +96,6 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setCharacter(data);
-        // Show character panel if we have character data
-        if (data && Object.keys(data).length > 0 && data.name) {
-          setShowCharacterPanel(true);
-        }
       }
     } catch (error) {
       console.error('Error fetching character:', error);
@@ -117,10 +111,6 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setWorldInfo(data);
-        // Show world info panel if we have world data
-        if (data && (data.locations?.length > 0 || data.npcs?.length > 0 || data.quests?.length > 0)) {
-          setShowWorldInfoPanel(true);
-        }
       }
     } catch (error) {
       console.error('Error fetching world info:', error);
@@ -177,7 +167,7 @@ function App() {
       if (data.character) {
         setCharacter(data.character);
         if (data.character && Object.keys(data.character).length > 0 && data.character.name) {
-          setShowCharacterPanel(true);
+          // setShowCharacterPanel(true);
         }
       }
       
@@ -210,14 +200,6 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const toggleCharacterPanel = () => {
-    setShowCharacterPanel(!showCharacterPanel);
-  };
-
-  const toggleWorldInfoPanel = () => {
-    setShowWorldInfoPanel(!showWorldInfoPanel);
   };
 
   const updateCharacter = async (updatedCharacter) => {
@@ -265,39 +247,17 @@ function App() {
               />
             )}
           </div>
-          <div className="panel-controls">
-            <button 
-              className={`panel-toggle-btn ${showCharacterPanel ? 'active' : ''}`}
-              onClick={toggleCharacterPanel}
-            >
-              {showCharacterPanel ? 'Hide Character' : 'Show Character'}
-            </button>
-            <button 
-              className={`panel-toggle-btn ${showWorldInfoPanel ? 'active' : ''}`}
-              onClick={toggleWorldInfoPanel}
-              disabled={!worldInfo || (worldInfo.locations?.length === 0 && worldInfo.npcs?.length === 0 && worldInfo.quests?.length === 0)}
-            >
-              {showWorldInfoPanel ? 'Hide World Info' : 'Show World Info'}
-            </button>
-          </div>
         </div>
       </header>
       
       <div className="main-content">
-        <div className={`sidebar-container ${showCharacterPanel || showWorldInfoPanel ? 'active' : ''}`}>
-          {showCharacterPanel && (
-            <CharacterPanel 
-              character={character} 
-              updateCharacter={updateCharacter}
-              gameState={gameState}
-            />
-          )}
-          
-          {showWorldInfoPanel && (
-            <WorldInfoPanel 
-              worldInfo={worldInfo}
-            />
-          )}
+        {/* Character panel on the left */}
+        <div className="character-panel-container">
+          <CharacterPanel 
+            character={character} 
+            updateCharacter={updateCharacter}
+            gameState={gameState}
+          />
         </div>
         
         <div className="chat-container">
@@ -348,6 +308,13 @@ function App() {
               {isLoading ? 'Sending...' : 'Send'}
             </button>
           </form>
+        </div>
+
+        {/* World info panel on the right */}
+        <div className="world-info-panel-container">
+          <WorldInfoPanel 
+            worldInfo={worldInfo}
+          />
         </div>
       </div>
     </div>
