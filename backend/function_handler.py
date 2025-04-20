@@ -5,8 +5,9 @@ import random
 from datetime import datetime
 
 class FunctionHandler:
-    def __init__(self, db_manager):
+    def __init__(self, db_manager, vector_db_manager=None):
         self.db = db_manager
+        self.vector_db = vector_db_manager  # Add vector DB manager
     
     def parse_and_execute_functions(self, ai_response, session_id):
         """Parse the AI response for function calls and execute them."""
@@ -40,6 +41,7 @@ class FunctionHandler:
         
         # Return the cleaned response and function results
         cleaned_response = re.sub(function_pattern, '', ai_response)
+        cleaned_response = re.sub(alt_function_pattern, '', cleaned_response)
         return cleaned_response, results
     
     def _execute_function(self, func_name, args, session_id):
@@ -64,6 +66,11 @@ class FunctionHandler:
         """Update character information."""
         try:
             character_id = self.db.save_character(session_id, args)
+            
+            # Also store in vector DB if available
+            if self.vector_db:
+                vector_character_id = self.vector_db.add_character_memory(session_id, args)
+            
             return {
                 'success': True,
                 'function': 'update_character',
@@ -80,6 +87,11 @@ class FunctionHandler:
         """Add a location to the game world."""
         try:
             location_id = self.db.add_location(session_id, args)
+            
+            # Also store in vector DB if available
+            if self.vector_db:
+                vector_location_id = self.vector_db.add_location_memory(session_id, args)
+            
             return {
                 'success': True,
                 'function': 'add_world_location',
@@ -97,6 +109,11 @@ class FunctionHandler:
         """Add an NPC to the game world."""
         try:
             npc_id = self.db.add_npc(session_id, args)
+            
+            # Also store in vector DB if available
+            if self.vector_db:
+                vector_npc_id = self.vector_db.add_npc_memory(session_id, args)
+            
             return {
                 'success': True,
                 'function': 'add_npc',
@@ -114,6 +131,11 @@ class FunctionHandler:
         """Create or update a quest."""
         try:
             quest_id = self.db.update_quest(session_id, args)
+            
+            # Also store in vector DB if available
+            if self.vector_db:
+                vector_quest_id = self.vector_db.add_quest_memory(session_id, args)
+            
             return {
                 'success': True,
                 'function': 'update_quest',
@@ -152,7 +174,7 @@ class FunctionHandler:
                 'error': str(e)
             }
         
-    def _handle_adventure_start(self, session_id):
+    def _handle_adventure_start(self, args, session_id):
         """Update game state to adventure when character creation is complete."""
         self.db.update_game_state(session_id, "adventure")
         return {

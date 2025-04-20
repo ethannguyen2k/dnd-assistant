@@ -7,6 +7,7 @@ from datetime import datetime
 import traceback
 import logging
 from db_manager import DatabaseManager
+from vector_db_manager import VectorDBManager
 from prompts import get_system_prompt
 from function_handler import FunctionHandler
 from function_schemas import FUNCTION_SCHEMAS
@@ -27,9 +28,10 @@ app = Flask(__name__)
 CORS(app, supports_credentials=True)  # Enable CORS with credentials support
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure random key
 
-# Initialize database and function handler
+# Initialize databases and function handler
 db = DatabaseManager()
-function_handler = FunctionHandler(db)
+vector_db = VectorDBManager()  # Initialize the vector database
+function_handler = FunctionHandler(db, vector_db)  # Pass both database managers
 
 # Ollama API endpoint - adjust if Ollama is running on a different host
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -93,8 +95,9 @@ def chat():
         # Get message history from database
         message_history = db.get_messages(session_id)
         
-        # Save user message to database
+        # Save user message to database AND vector database
         db.save_message(session_id, "user", user_message)
+        vector_db.add_conversation_memory(session_id, "user", user_message)
         
         # Get character information if available
         character = db.get_character(session_id)
@@ -105,8 +108,12 @@ def chat():
         quests = db.get_quests(session_id)
         combat_state = db.get_combat_state(session_id)
         
-        # Format message history and add system prompt
-        system_prompt = get_system_prompt(game_state)
+        # Get relevant context from vector database
+        vector_context = vector_db.generate_narrative_context(session_id, user_message)
+        logger.info("Generated vector context for prompt")
+        
+        # Format message history and add system prompt with vector context
+        system_prompt = get_system_prompt(game_state, vector_context)
         formatted_messages = format_messages(
             message_history, 
             user_message, 
@@ -129,6 +136,8 @@ def chat():
         
         # Process function calls in the response
         cleaned_response, function_results = function_handler.parse_and_execute_functions(ai_response, session_id)
+        
+        # Clean up any remaining function calls in the text
         cleaned_response = re.sub(r'```function.*?```', '', cleaned_response, flags=re.DOTALL)
         cleaned_response = re.sub(r'function\s+\w+\s*\(.*?\)', '', cleaned_response, flags=re.DOTALL)
 
@@ -139,8 +148,13 @@ def chat():
             # Add a reminder
             cleaned_response += "\n\n[Waiting for your input...]"
         
-        # Save cleaned assistant message to database
+        # Ensure responses are properly prefixed with "Game Master:"
+        if not cleaned_response.startswith("Game Master:"):
+            cleaned_response = "Game Master: " + cleaned_response
+        
+        # Save cleaned assistant message to database AND vector database
         db.save_message(session_id, "assistant", cleaned_response)
+        vector_db.add_conversation_memory(session_id, "assistant", cleaned_response)
         
         # Get current game state after function calls
         game_state = db.get_game_state(session_id)
@@ -268,6 +282,11 @@ def update_character():
         return jsonify({"error": "Session ID required"}), 400
     
     character_id = db.save_character(session_id, character_data)
+    
+    # Also update in vector database
+    if character_data:
+        vector_db.add_character_memory(session_id, character_data)
+    
     return jsonify({"character_id": character_id})
 
 @app.route('/world', methods=['GET'])
@@ -285,6 +304,21 @@ def get_world_info():
         "locations": locations,
         "npcs": npcs,
         "quests": quests
+    })
+
+@app.route('/vector-context', methods=['GET'])
+def get_vector_context():
+    """Debug endpoint to see what context the vector database is providing."""
+    session_id = request.args.get('session_id')
+    query = request.args.get('query', '')
+    
+    if not session_id:
+        return jsonify({"error": "Session ID required"}), 400
+    
+    context = vector_db.generate_narrative_context(session_id, query)
+    
+    return jsonify({
+        "context": context
     })
 
 def format_messages(history, current_message, system_prompt, character=None, 
@@ -348,11 +382,10 @@ def format_messages(history, current_message, system_prompt, character=None,
         if role == 'user':
             formatted_prompt += f"Player: {content}\n"
         elif role == 'assistant':
-            formatted_prompt += f"Game Master: {content}\n"
+            formatted_prompt += f"{content}\n"
     
     # Add the current message
     formatted_prompt += f"Player: {current_message}\n"
-    formatted_prompt += "Game Master:"
     
     return formatted_prompt
 
